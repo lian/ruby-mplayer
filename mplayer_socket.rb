@@ -167,36 +167,41 @@ describe 'MPlayer Pty' do
     @mp.buffer.size.should == 0
   end
 
-=begin
   it 'should load files' do
-    @mp << "loadfile test.mp3 0\n";  wait 1
-    p @mp.buffer
+    @mp.player.loadfile("test.mp3", 0);  wait 1
 
-    @mp.pop.should == "loadfile test.mp3 0\r\n"
-    @mp.pop.should == "\r\nPlaying test.mp3.\r\n"
-    @mp.pop.should == "Audio only file format detected.\r\nClip info:\r\n Title: awwcrap\r\n Artist: \r\n Album: \r\n Year: \r\n Comment: \r\n Genre: Blues\r\n==========================================================================\r\nOpening audio decoder: [ffmpeg] FFmpeg/libavcodec audio decoders\r\n"
+    res = @mp.read
 
-    @mp.buffer.size.should != 0
+    res.should.include? "loadfile test.mp3 0"
+    res.should.include? "Playing test.mp3."
+    res.should.include? "Audio only file format detected."
+
+    rest = "Clip info:\r\n Title: awwcrap\r\n Artist: \r\n Album: \r\n Year: \r\n Comment: \r\n Genre: Blues\r\n"
+    res.join.should.include? rest.split("\r\n").join
+    # "==========================================================================\r\n"
+    # "Opening audio decoder: [ffmpeg] FFmpeg/libavcodec audio decoders\r\n"
+
+    @mp.buffer.size.should == 0
   end
 
   it 'get_time_pos' do
     @mp.buffer.clear
-    @mp << "get_time_pos\n";  wait 1
+    #@mp << "get_time_pos\n";  wait 1
+    @mp.player.get_time_pos;  wait 1
 
-    #p @mp.buffer
-    @mp.pop.should == "get_time_pos\r\n"
-    @mp.pop.should.match(/ANS_TIME_POSITION\=(.+?)\r\n/)
-    #@mp.buffer.size.should == 0
+    res = @mp.read
+    res[0].should == "get_time_pos"
+    res[1].should.match(/ANS_TIME_POSITION\=(.+?)/)
+    @mp.buffer.size.should == 0
   end
-=end
 
   sleep 1
 
   it 'should exit' do
     @mp.player.quit   ; wait 1
 
-    res = @mp.read
-    res.should == ["quit 0", "", "Exiting... (Quit)"]
+    res = @mp.read.reverse[0..2]
+    res.should == ["quit 0", "", "Exiting... (Quit)"].reverse
 
     ['quit 0', 'Exiting... (Quit)'].each do |out|
       res.should.include? out
