@@ -83,21 +83,39 @@ class MPlayer < Term
 
   # TODO: use EM's buffer helper, make custom?
   def read
-    buf = @buffer.join; @buffer = []
-    @rx_bytes += buf.size
-
-    buf.split("\r\n")
+    buf = @buffer.dup; @buffer = []
+    buf
   end
 
   def send_cmd(cmd_stdin)
     @pty_queue << cmd_stdin + "\n"
   end
 
+  STA_LINE = 'A:'
+  STA_RETURN = "\r\n"
+  STA_CR_LINE = "\e[J\r"
+
+  def handle_position_state(line)
+    # "A:   0.0 (00.0) of 1.0 (01.0) ??,?% \e[J\rA:   0.1 (00.0) of 1.0 (01.0) ??,?% \e[J\r"
+    #puts 'position_state input: %s' % [line.inspect]
+  end
+
   def on_chunk(chunk)
-    @buffer << chunk
     #p '------------', chunk
-  rescue StringScanner::Error => ex
-    #VER.error(ex)
+
+    chunk.split(STA_RETURN).each do |c|
+      if c[0..1] == STA_LINE
+        c.split(STA_CR_LINE).each { |cc|
+          if cc[0..1] == STA_LINE
+            handle_position_state cc
+          else
+            @buffer << cc
+          end
+        }
+      else
+        @buffer << c
+      end
+    end
   rescue => ex
     puts "#{ex.class}: #{ex}", *ex.backtrace
     @buffer = ''
@@ -118,12 +136,8 @@ Bacon.summary_on_exit
 
 describe 'MPlayer Pty' do
   @mp = MPlayer.new
-  #after { @mp.destroy }
-  def wait(n=1)
-    n.times { sleep 0.5 }
-  end
 
-  wait;wait
+  def wait(n=1,s=0.5);n.times{sleep s};end; wait;wait
 
   it 'should start' do
     @mp.buffer.should != []
@@ -131,15 +145,11 @@ describe 'MPlayer Pty' do
 
     build_info.should.match /MPlayer (.+?) (.+?) MPlayer Team/
     codec_info.should.match /(.+?) audio & (.+?) video codecs/
-    @mp.buffer.size.should == 0
   end
 
   it 'get_time_pos' do
     @mp.player.get_time_pos;  wait 1
-
-    res = @mp.read
-    res.should == ["get_time_pos" ]
-    @mp.buffer.size.should == 0
+    @mp.read.should == ["get_time_pos" ]
   end
 
   it 'sets loop' do
@@ -171,43 +181,56 @@ describe 'MPlayer Pty' do
     @mp.player.loadfile("test.mp3", 0);  wait 1
 
     res = @mp.read
+    res.should == [
+      "loadfile test.mp3 0",
+      "",
+      "Playing test.mp3.",
+      "Audio only file format detected.",
+      "Clip info:",
+      " Title: awwcrap",
+      " Artist: ",
+      " Album: ",
+      " Year: ",
+      " Comment: ",
+      " Genre: Blues",
+      "==========================================================================",
+      "Opening audio decoder: [ffmpeg] FFmpeg/libavcodec audio decoders",
+      "AUDIO: 44100 Hz, 1 ch, s16le, 64.0 kbit/9.07% (ratio: 8000->88200)",
+      "Selected audio codec: [ffmp3] afm: ffmpeg (FFmpeg MPEG layer-3 audio)",
+      "==========================================================================",
+      "AO: [oss] 44100Hz 1ch s16le (2 bytes per sample)", "Video: no video", "Starting playback..."
+    ]
+  end
 
-    res.should.include? "loadfile test.mp3 0"
-    res.should.include? "Playing test.mp3."
-    res.should.include? "Audio only file format detected."
-
-    rest = "Clip info:\r\n Title: awwcrap\r\n Artist: \r\n Album: \r\n Year: \r\n Comment: \r\n Genre: Blues\r\n"
-    res.join.should.include? rest.split("\r\n").join
-    # "==========================================================================\r\n"
-    # "Opening audio decoder: [ffmpeg] FFmpeg/libavcodec audio decoders\r\n"
-
-    @mp.buffer.size.should == 0
+  it 'sets loop' do
+    @mp.player.loop(3);  wait 1
+    @mp.read.should == [ 'loop 3 0', "\e[A\r\e[KLoop: 2" ]
   end
 
   it 'get_time_pos' do
-    @mp.buffer.clear
-    #@mp << "get_time_pos\n";  wait 1
     @mp.player.get_time_pos;  wait 1
+    first, second = @mp.read
 
-    res = @mp.read
-    res[0].should == "get_time_pos"
-    res[1].should.match(/ANS_TIME_POSITION\=(.+?)/)
-    @mp.buffer.size.should == 0
+    first.should == "get_time_pos"
+    second.should.match /ANS_TIME_POSITION\=(.+?)/
   end
 
-  sleep 1
+  it 'pause' do
+    @mp.player.pause;  wait 1
+    @mp.read.should == ["pause", "\e[A\r\e[K  =====  PAUSE  ====="]
+  end
+
+  it 'resume' do
+    @mp.player.pause;  wait 4
+    @mp.read.should == ["pause", "\e[A\r\e[K"]
+  end
+
+
+  sleep 2
 
   it 'should exit' do
     @mp.player.quit   ; wait 1
-
-    res = @mp.read.reverse[0..2]
-    res.should == ["quit 0", "", "Exiting... (Quit)"].reverse
-
-    ['quit 0', 'Exiting... (Quit)'].each do |out|
-      res.should.include? out
-    end
-
-    @mp.buffer.size.should == 0
+    @mp.read.should == ["quit 0", "", "Exiting... (Quit)"]
   end
 
   @mp.destroy
