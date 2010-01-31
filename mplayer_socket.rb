@@ -65,7 +65,7 @@ class Term
 end
 
 
-MPLAYER_INIT_CMD = '/usr/bin/mplayer -nolirc -noconsolecontrols -slave -idle'
+MPLAYER_INIT_CMD = '/usr/bin/mplayer -ao alsa -nolirc -noconsolecontrols -slave -idle'
 require 'mplayer_commands_module.rb'
 
 class MPlayer < Term
@@ -73,29 +73,44 @@ class MPlayer < Term
   def initialize(session_id = Process.pid)
     super(session_id, MPLAYER_INIT_CMD)
     @buffer ||= []
-    @rx_bytes = 0
+    @cb_cmd = nil
     @player = PlayerMethods.new self
   end
 
-  def pop
-    @buffer.shift
+  def read;buf = @buffer.dup; @buffer = []; buf;end
+
+  # silly
+  def handle_cb_cmd
+    _cmd = @cb_cmd
+    while @buffer.empty?
+      # escape wait when cb_cmd changes
+      if _cmd != @cb_cmd
+        _cmd = @cb_cmd; @buffer << ''
+      end
+      sleep 0.5  # :.(
+      # if each caller passes his callback
+      # and end_string or line_size,
+      # this method can finally be removed
+    end
+
+    cmd, *buf = @buffer.dup; @buffer = []
+
+    (cmd == _cmd) ? buf : handle_cb_cmd
   end
 
-  # TODO: use EM's buffer helper, make custom?
-  def read
-    buf = @buffer.dup; @buffer = []
-    buf
-  end
-
-  def send_cmd(cmd_stdin)
+  def send_cmd(cmd_stdin, _nodefer=true)
     @pty_queue << cmd_stdin + "\n"
+    @cb_cmd = cmd_stdin
+    _nodefer ? handle_cb_cmd : @pty_queue
   end
 
   STA_LINE = 'A:'
   STA_RETURN = "\r\n"
   STA_CR_LINE = "\e[J\r"
+  # [mp3 @ 0xa160d70]overread, skip -4 enddists: -3 -3
+  STA_EMP3 = "[m"
 
-  def handle_position_state(line)
+  def handle_position_state(line) # or skip.
     # "A:   0.0 (00.0) of 1.0 (01.0) ??,?% \e[J\rA:   0.1 (00.0) of 1.0 (01.0) ??,?% \e[J\r"
     #puts 'position_state input: %s' % [line.inspect]
   end
@@ -104,14 +119,18 @@ class MPlayer < Term
     #p '------------', chunk
 
     chunk.split(STA_RETURN).each do |c|
-      if c[0..1] == STA_LINE
+      case c[0..1]
+      when STA_LINE
         c.split(STA_CR_LINE).each { |cc|
           if cc[0..1] == STA_LINE
-            handle_position_state cc
+            #handle_position_state cc
+            # skip A: stdout
           else
             @buffer << cc
           end
         }
+      when STA_EMP3
+        # skip [mp3.. stdout
       else
         @buffer << c
       end
@@ -130,7 +149,7 @@ class MPlayer < Term
 end
 
 
-
+#__END__
 require 'bacon'
 Bacon.summary_on_exit
 
@@ -148,41 +167,27 @@ describe 'MPlayer Pty' do
   end
 
   it 'get_time_pos' do
-    @mp.player.get_time_pos;  wait 1
-    @mp.read.should == ["get_time_pos" ]
+    @mp.player.get_time_pos.should == []
   end
 
   it 'sets loop' do
-    @mp.player.loop(2, 0);  wait 1
-    @mp.read.should == ["loop 2 0" ]
-
-    @mp.player.loop(4, 1);  wait 1
-    @mp.read.should == ["loop 4 1" ]
-
-    @mp.buffer.size.should == 0
+    @mp.player.loop(2, 0).should == []
+    @mp.player.loop(4, 1).should == []
   end
 
   it 'get_sub_visibility' do
-    @mp.player.get_sub_visibility;  wait 1
-    @mp.read.should == [ 'get_sub_visibility' ]
+    @mp.player.get_sub_visibility.should == []
   end
 
   it 'sets frame_drop' do
-    @mp.player.frame_drop(0);  wait 1
-    @mp.read.should == [ 'frame_drop 0' ]
-
-    @mp.player.frame_drop;  wait 1
-    @mp.read.should == [ 'frame_drop 0' ]
-
+    @mp.player.frame_drop(0).should == []
+    @mp.player.frame_drop.should == []
     @mp.buffer.size.should == 0
   end
 
   it 'should load files' do
-    @mp.player.loadfile("test.mp3", 0);  wait 1
-
-    res = @mp.read
+    res = @mp.player.loadfile("test.mp3", 0)
     res.should == [
-      "loadfile test.mp3 0",
       "",
       "Playing test.mp3.",
       "Audio only file format detected.",
@@ -198,39 +203,32 @@ describe 'MPlayer Pty' do
       "AUDIO: 44100 Hz, 1 ch, s16le, 64.0 kbit/9.07% (ratio: 8000->88200)",
       "Selected audio codec: [ffmp3] afm: ffmpeg (FFmpeg MPEG layer-3 audio)",
       "==========================================================================",
-      "AO: [oss] 44100Hz 1ch s16le (2 bytes per sample)", "Video: no video", "Starting playback..."
+      "AO: [alsa] 48000Hz 1ch s16le (2 bytes per sample)", "Video: no video", "Starting playback..."
+      #"AO: [oss] 44100Hz 1ch s16le (2 bytes per sample)", "Video: no video", "Starting playback..."
     ]
   end
 
   it 'sets loop' do
-    @mp.player.loop(3);  wait 1
-    @mp.read.should == [ 'loop 3 0', "\e[A\r\e[KLoop: 2" ]
+    @mp.player.loop(3).should == ["\e[A\r\e[KLoop: 2"]
   end
 
   it 'get_time_pos' do
-    @mp.player.get_time_pos;  wait 1
-    first, second = @mp.read
-
-    first.should == "get_time_pos"
-    second.should.match /ANS_TIME_POSITION\=(.+?)/
+    @mp.player.get_time_pos.first.should.match /ANS_TIME_POSITION\=(.+?)/
   end
 
   it 'pause' do
-    @mp.player.pause;  wait 1
-    @mp.read.should == ["pause", "\e[A\r\e[K  =====  PAUSE  ====="]
+    @mp.player.pause.should == ["\e[A\r\e[K  =====  PAUSE  ====="]
   end
 
   it 'resume' do
-    @mp.player.pause;  wait 4
-    @mp.read.should == ["pause", "\e[A\r\e[K"]
+    @mp.player.pause.should == ["\e[A\r\e[K"]
   end
 
 
   sleep 2
 
   it 'should exit' do
-    @mp.player.quit   ; wait 1
-    @mp.read.should == ["quit 0", "", "Exiting... (Quit)"]
+    @mp.player.quit.should == ['', 'Exiting... (Quit)']
   end
 
   @mp.destroy
