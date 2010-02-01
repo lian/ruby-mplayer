@@ -211,8 +211,10 @@ describe 'MPlayer Pty' do
       "AUDIO: 44100 Hz, 1 ch, s16le, 64.0 kbit/9.07% (ratio: 8000->88200)",
       "Selected audio codec: [ffmp3] afm: ffmpeg (FFmpeg MPEG layer-3 audio)",
       "==========================================================================",
-      "AO: [alsa] 48000Hz 1ch s16le (2 bytes per sample)", "Video: no video", "Starting playback..."
+      #"AO: [alsa] 48000Hz 1ch s16le (2 bytes per sample)", "Video: no video", "Starting playback..."
       #"AO: [oss] 44100Hz 1ch s16le (2 bytes per sample)", "Video: no video", "Starting playback..."
+      "[AO SDL] Samplerate: 44100Hz Channels: Mono Format s16le", "AO: [sdl] 44100Hz 1ch s16le (2 bytes per sample)",
+      "Video: no video", "Starting playback..."
     ]
   end
 
