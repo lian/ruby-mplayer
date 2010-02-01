@@ -65,7 +65,8 @@ class Term
 end
 
 
-MPLAYER_INIT_CMD = '/usr/bin/mplayer -ao alsa -nolirc -noconsolecontrols -slave -idle'
+#MPLAYER_INIT_CMD = '/usr/bin/mplayer -ao alsa -nolirc -noconsolecontrols -slave -idle'
+MPLAYER_INIT_CMD = '/usr/bin/mplayer -ao sdl -nolirc -noconsolecontrols -slave -idle'
 require 'mplayer_commands_module.rb'
 
 class MPlayer < Term
@@ -75,6 +76,13 @@ class MPlayer < Term
     @buffer ||= []
     @cb_cmd = nil
     @player = PlayerMethods.new self
+  end
+
+  def pause; @player.pause; end
+  def volume(level); @player.volume(level,1); end
+
+  def quit
+    @pty_queue << "quit\n";sleep 1; destroy
   end
 
   def read;buf = @buffer.dup; @buffer = []; buf;end
@@ -149,7 +157,7 @@ class MPlayer < Term
 end
 
 
-#__END__
+__END__
 require 'bacon'
 Bacon.summary_on_exit
 
